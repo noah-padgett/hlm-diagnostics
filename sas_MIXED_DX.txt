@@ -1,0 +1,529 @@
+MACRO MIXED_DX
+%macro MIXED_DX (ModelI = modelstuff, Dims = datstuff, solnF = Fixed, solnR =
+L2Resid, Level1 = L1Resid, Influence = influence, min_nj = 5, pr = 90);
+/*
+* +-----------------------------------------------------------------------------------------------------------+
+Important information about the types of models that are supported by
+macro MIXED_DX:
+* +-----------------------------------------------------------------------------------------------------------+;
+a. MIXED_DX has been tested for use in SAS 9.1.3 and 9.2
+b. MIXED_DX utilizes the following SAS components: Base SAS, SAS/STAT,
+SAS/GRAPH ,and SAS/IML
+c. MIXED_DX works for 2-level linear multilevel models estimated in PROC MIXED
+d. MIXED_DX works correctly for models that have converged and have positive
+G-matrices
+e. MIXED_DX is designed to read model effect names up to 32 characters in length. If a
+user has a n effect that is longer than 32 characters, the 'NAMELEN= ' option in
+PROC MIXED must be updated accordingly.
+f. If a user's model contains any interactions, they must be created on the model
+statement (e.g., model y=x1 x2 w1 w2 x1*w1)
+g. Users cannot use the class statement to create dummy variables in PROC MIXED.
+That is, any dummy variables used in the model statement need to be created prior
+to the MIXED procedure (e.g., in a data step).
+h. Users need to specify their desired value for MIN_NJ, which defines the smallest
+level-2 unit to be included in the within-unit box-and-whisker plots and normality
+assessments. The default is set to 5.Even if this subanalysis is not wanted, the
+user must override the default value of 5 and specify some value for MIN_NJ such
+as min_nj = 1.
+i. Users need to specify their desired value for PR, which defines the threshold
+percentile rank of influence diagnostics that trigger the flagging of level-2 units.
+The default is set to 90.
+As you use the macro, please feel free to send feedback, comments, and/or suggestions
+to, Bethany A. Bell, at babell@sc.edu.
+The complete MIXED_DX SAS program file is available for download from
+http://www.ed.sc.edu/bell/
+*/
+* +-----------------------------------------------------------------------------------------------------------+
+Define the variable &SUBJ whose value is the clustering variable name from PROC
+MIXED
+* +-----------------------------------------------------------------------------------------------------------+;
+%global subj;
+data getsubj; set &ModelI; if Descr = 'Subject Effect'; call symput('SUBJ',Value);
+* +-----------------------------------------------------------------------------------------------------------+
+Obtain level-1 residual means, variances, and sample sizes for each unit
+* +-----------------------------------------------------------------------------------------------------------+;
+proc sort data = &Level1; by &subj;
+proc means noprint data = &Level1; by &subj;
+var Resid;
+output out = L1Summary mean = MN_Resid Var = Var_Resid N = Nj;
+data L1Summary; set L1summary; label Var_Resid = 'Variance of level-1 residual';
+* +-----------------------------------------------------------------------------------------------------------+
+Obtain level-1 residual means, variances, and sample sizes for each unit
+where Nj >= &min_nj
+* +-----------------------------------------------------------------------------------------------------------+;
+data L1Summary2; set L1Summary; if Nj GE &min_nj;
+* +-----------------------------------------------------------------------------------------------------------+
+Organizing the data to generate box-plots for the overall level-1 residual and for
+level-2 units where Nj >= &min_nj
+* +-----------------------------------------------------------------------------------------------------------+;
+**Applying format to subject variable to denote Overall Residual;
+proc format; value subjlbl 0 = 'Overall'; value $ subjlbl '0' = 'Overall';
+data L1ResidAll; set &Level1; &subj = 0;
+data box; set &Level1 L1ResidAll;
+&subj=trim(left(&subj));
+format &subj subjlbl.;
+proc sort data = box; by &subj;
+proc sort data = L1summary; by &subj;
+data box2; merge box L1summary; by &subj;
+if &subj = 0 or Nj ge &min_nj;
+format &subj subjlbl.;
+proc boxplot data=box;
+plot resid*&subj/vaxis = axis1 boxstyle = schematic cframe = steel
+cboxes = black
+cboxfill = white idsymbol = circle idcolor = bbl boxwidth = 2;
+symbol v = * color = bbl f='times new roman' h=1.5;
+axis1 label=(f='times new roman' h=2.5 a=90 r=0 'Level-1 Residual')
+value=(f='times new roman' h=2.5);
+title 'Overall level-1 residual and level-1 residual for each level-2 unit';
+proc boxplot data=box2;
+plot resid*&subj/vaxis = axis1 boxstyle = schematic cframe = steel
+cboxes = black
+cboxfill = white idsymbol = circle idcolor = bbl boxwidth = 2;
+symbol v = * color = bbl f='times new roman' h=1.5;
+axis1 label=(f='times new roman' h=2.5 a=90 r=0 'Level-1 Residual')
+value=(f='times new roman' h=2.5);
+title "Overall level-1 residual and level-1 residual for each level-2 unit
+where Nj >= &min_nj";
+* +-----------------------------------------------------------------------------------------------------------+
+Creating a normality summary statistics table for the overall level-1 residual and
+each level-2 unit
+* +-----------------------------------------------------------------------------------------------------------+;
+proc univariate data = box normal noprint; var resid; by &subj;
+output out=table n=nT skewness=skew kurtosis=ku normal=SW var=varT std=stdT
+probn=pvalue;
+data normal_table;
+set table;
+file print header=h notitles;
+put @1 &subj @25 skew 9.4 @35 ku 9.4 @45 SW 10.4 @60 pvalue 6.4 @70 varT 9.4
+@80 stdT 9.4 @90 nT 5.0;
+return;
+H: put @1 'Normality summary statistics for the overall residual and each level-2 unit'//
+13
+@1 'Level-2 Unit' @26 'Skewness' @36 'Kurtosis' @47 'Shapiro-Wilk' @60 'p-value'
+@71 'Variance' @82 'Std Dev' @93 'N'/;
+* +-----------------------------------------------------------------------------------------------------------+
+Creating a normality summary statistics table for the overall level-1 residual and
+each level-2 unit where Nj >= &min_nj
+* +-----------------------------------------------------------------------------------------------------------+;
+proc univariate data = box2 normal noprint; var resid; by &subj;
+output out=table2 n=nT skewness=skew kurtosis=ku normal=SW var=varT std=stdT
+probn=pvalue;
+data normal_table2;
+set table2;
+file print header=h notitles;
+put @1 &subj @25 skew 9.4 @35 ku 9.4 @45 SW 10.4 @60 pvalue 6.4 @70 varT 9.4
+@80 stdT 9.4 @90 nT 5.0;
+return;
+H: put @1 "Normality summary statistics for the overall residual and each level-2 unit
+where Nj >= &min_nj"//
+@1 'Level-2 Unit' @26 'Skewness' @36 'Kurtosis' @47 'Shapiro-Wilk' @60 'p-value'
+@71 'Variance' @82 'Std Dev' @93 'N'/;
+* +-----------------------------------------------------------------------------------------------------------+
+Histograms for overall level-1 residual and for each level-2 unit
+* +-----------------------------------------------------------------------------------------------------------+;
+proc univariate data = L1summary normal plot; var var_resid; id &subj;
+histogram var_resid /vscale=count cfill=steel;
+title 'Variance of level-1 residuals for all observations';
+*+-----------------------------------------------------------------------------------------------------------+
+Histograms for overall level-1 residual and for level-2 units where Nj >= &min_nj
+* +-----------------------------------------------------------------------------------------------------------+;
+proc univariate data = L1summary2 normal plot; var var_resid; id &subj;
+histogram var_resid /vscale=count cfill=steel;
+title "Variance of level-1 residuals for each level-2 unit where Nj >= &min_nj";
+* +-----------------------------------------------------------------------------------------------------------+
+Obtaining the absolute value of level-1 residuals and then running a one-way
+ANOVA to test for equal variances, which is analogous to Levenes Test
+* +-----------------------------------------------------------------------------------------------------------+;
+data Levene; set &Level1;
+Absolute_resid = abs(resid);
+label Absolute_resid = '(Absolute value of level-1 residual)';
+title 'Levenes test of homogeneity of variance of level-1 residuals';
+proc glm data=levene; class &subj; model Absolute_resid=&subj;
+* +-----------------------------------------------------------------------------------------------------------+
+Assessment of level-1 residual normality and equal variance through the scatterplot
+* +-----------------------------------------------------------------------------------------------------------+;
+symbol1 font =, color=blue interpol=none height=2.5 v=circle;
+proc gplot data = &Level1;
+plot resid*pred /vaxis = axis1 haxis =axis2;
+title1 'Plot of level-1 residuals*predicted values';
+axis1 label=(f='times new roman' h=2.5 'Residual')
+value=(f='times new roman' h=2.5);
+axis2 label=(f='times new roman' h=2.5 'Predicted')
+value=(f='times new roman' h=2.5);
+* +-----------------------------------------------------------------------------------------------------------+
+Define the variable &dat whose value is the dataset name from PROC MIXED
+* +-----------------------------------------------------------------------------------------------------------+;
+%global dat;
+data getdat; set &ModelI; if Descr = 'Data Set'; call symput('DAT',Value);
+run;
+* +-----------------------------------------------------------------------------------------------------------+
+Define the variable &n2 whose value is the number of level-2 units from PROC MIXED
+* +-----------------------------------------------------------------------------------------------------------+;
+%global n2;
+data getn2; set &Dims; if Descr = 'Subjects'; call symput('n2',Value);
+run;
+* +-----------------------------------------------------------------------------------------------------------+
+Make a little data set containing names of the main effects used in PROC MIXED
+* +-----------------------------------------------------------------------------------------------------------+;
+data preds; set &solnF; keep effect; if effect='Intercept' then delete;
+if index(effect, '*')>0 then delete;
+* +-----------------------------------------------------------------------------------------------------------+
+Count the number of main effects used in PROC MIXED
+* +-----------------------------------------------------------------------------------------------------------+;
+data _null_; set preds end=lastrec;
+if lastrec then do;
+call symput('totalvars',_n_);
+end;
+run;
+* +-----------------------------------------------------------------------------------------------------------+
+Make a macro variable to calculate predicted values (pred1, pred2, etc.) for each
+main effect in PROC MIXED
+* +-----------------------------------------------------------------------------------------------------------+;
+%do nn=1 %to &totalvars;
+%global pred&nn;
+data _null_; set preds; if &nn=_n_; call symput("pred&nn",effect); run;
+%end;
+* +-----------------------------------------------------------------------------------------------------------+
+Make a mini-macro to generate the list of main effects in PROC MIXED
+* +-----------------------------------------------------------------------------------------------------------+;
+%macro create_predlist;
+%do k=1 %to &totalvars;
+&&pred&k
+%end;
+%mend create_predlist;
+* +-----------------------------------------------------------------------------------------------------------+
+Compute means and variances of each main effect variable for each level-2 unit
+* +-----------------------------------------------------------------------------------------------------------+;
+proc sort data = &dat; by &subj;
+proc means data = &dat nway noprint; class &subj;
+var %create_predlist;
+output out=m mean=;
+output out=s std=;
+14
+* +-----------------------------------------------------------------------------------------------------------+
+Compute the sum of the within unit stds for each main effect variable
+* +-----------------------------------------------------------------------------------------------------------+;
+proc means data=s nway noprint;
+var %create_predlist;
+output out=ss sum=;
+* +-----------------------------------------------------------------------------------------------------------+
+Make data set containing names of the level-2 variables
+(those where within unit std = 0)
+* +-----------------------------------------------------------------------------------------------------------+;
+proc transpose data=ss out=sss;
+data sss2; set sss; if COL1=0 and _NAME_ NE '_TYPE_';
+data sss3; set sss2; rename _NAME_ = Effect;
+data sss4; set sss3; lev2=1; keep effect lev2;
+* +-----------------------------------------------------------------------------------------------------------+
+Count the number of level-1 predictors with random slopes
+* +-----------------------------------------------------------------------------------------------------------+;
+data _null_; set &SolnR end=lastrec;
+if lastrec then do;
+call symput('totalrand',_n_);
+call symput('numlev1',_n_/&n2);
+end;
+run;
+* +-----------------------------------------------------------------------------------------------------------+
+Make data set containing names of the level-1 variables with random slopes
+* +-----------------------------------------------------------------------------------------------------------+;
+data lev11; set &solnR (FIRSTOBS=1 OBS=&numlev1);
+data lev12; set lev11; keep effect;
+data lev13; set lev12;
+effecttxt=cats("'",effect,"'");
+lev1r=1;
+inter1=cats("*",effect); inter2=cats(effect,"*");
+lenint1=length(inter1); lenint2=length(inter2); lenint3=lenint1+1;
+* +-----------------------------------------------------------------------------------------------------------+
+Make a macro variable (rand1, rand2, etc.) for each random effect in PROC MIXED
+* +-----------------------------------------------------------------------------------------------------------+;
+%do mm=1 %to &numlev1;
+%global rand&mm;
+%global int1&mm;
+%global int2&mm;
+%global len1&mm;
+%global len2&mm;
+%global len3&mm;
+data _null_;
+set lev13;
+if &mm=_n_;
+call symput("rand&mm",Effecttxt);
+call symput("int1&mm",inter1);
+call symput("int2&mm",inter2);
+call symput("len1&mm",lenint1);
+call symput("len2&mm",lenint2);
+call symput("len3&mm",lenint3);
+run;
+%end;
+proc sort data = m; by &subj;
+* +-----------------------------------------------------------------------------------------------------------+
+For each random effect: Make data set containing level-2 variables, level-2 errors, and
+predicted values
+* +-----------------------------------------------------------------------------------------------------------+;
+%do ii=1 %to &numlev1;
+* +-----------------------------------------------------------------------------------------------------------+
+For each random effect: Make a prediction equation, compute predicted values and
+plot the level-2 residuals with the predicted values
+* +-----------------------------------------------------------------------------------------------------------+;
+%if &ii=1 %then %do;
+data eq1; set &solnF;
+data eq2; set sss4;
+proc sort data=eq1; by effect;
+proc sort data=eq2; by effect;
+data eq4; merge eq1 eq2; by effect; if Effect=&&rand&ii or lev2=1;
+data eq5; set eq4;
+term=cats("+",estimate,"*",effect);
+if effect='Intercept' then term=cats("1*",estimate);
+data _null_; set eq5 end=lastrec; if lastrec then do;
+call symput('totalterms',_n_);
+end;
+run;
+%do z=1 %to &totalterms;
+%global term&z;
+data _null_; set eq5; if &z=_n_; call symput("term&z",term); run;
+%end;
+%macro create_eqs;
+%do w=1 %to &totalterms;
+&&term&w
+%end;
+%mend create_eqs;
+data r1; set &solnR; if Effect=&&rand&ii;
+proc sort data=r1; by &subj;
+data lev2dat; merge r1 m; by &subj; rename estimate = Residual;
+data lev2datp; set lev2dat; Predicted=%create_eqs;
+label predicted=Predicted&&rand&ii;
+*+------------------------------------------------------------------------------------------------------------+
+Assessment of level-2 residual normality and equal variance through scatterplots
+for each level-2 effect
+* +------------------------------------------------------------------------------------------------------------+;
+* +------------------------------------------------------------------------------------------------------------+
+If no variance in the predicted values, do not produce a scatter plot
+* +-------------------------------------------------------------------------------------------------------------+;
+proc means noprint data = lev2datp;
+var predicted;
+output out = check_var var = predicted_variance;
+data back; if _n_ = 1 then set check_var; set lev2datp; retain predicted_variance;
+if predicted_variance = 0 then do;
+15
+predicted = .; residual = .;
+end;
+proc gplot data=back;
+plot residual*predicted;
+title "Homogeneity of variance plot of level-2 errors";
+%end;
+%if &ii>1 %then %do;
+data eq1; set &solnF; keep effect estimate;
+data eq2; set sss4;
+data eq3; set lev13; keep effect lev1r;
+proc sort data=eq1; by effect;
+proc sort data=eq2; by effect;
+proc sort data=eq3; by effect;
+data eq3; merge eq1 eq2 eq3; by effect;
+data eq4; set eq3;
+inter=cats(&&rand&ii,"*");
+inter2=cats("*",&&rand&ii);
+length effect2 $&&len1&ii;
+effect2=effect;
+length effect5 $&&len2&ii;
+length effect6 $&&len2&ii;
+effect3=reverse(effect);
+effect4=cats(effect3);
+effect5=effect4;
+effect6=reverse(effect5);
+data eq5; set eq4; if effect=&&rand&ii or inter=effect2 or inter2=effect6;
+data eq6; set eq5;
+if index(effect, '*')>0 then do;
+if inter=effect2 then do;
+effect7=substr(effect, &&len3&ii);
+end;
+if inter2=effect6 then do;
+effect8=cats(reverse(effect));
+effect9=substr(effect8, &&len3&ii);
+effect7=cats(reverse(effect9));
+end;
+end;
+term=cats("+",estimate,"*",effect7);
+if effect=&&rand&ii then term=cats("1*",estimate);
+run;
+data _null_; set eq6 end=lastrec;
+if lastrec then do;
+call symput('totalterms',_n_);
+end;
+run;
+%do z=1 %to &totalterms;
+%global term&z;
+data _null_; set eq6; if &z=_n_; call symput("term&z",term); run;
+%end;
+%macro create_eqs;
+%do w=1 %to &totalterms;
+&&term&w
+%end;
+%mend create_eqs;
+data r1; set &solnR; if Effect=&&rand&ii;
+proc sort data=r1; by &subj;
+data lev2dat; merge r1 m; by &subj;
+rename estimate = Residual;
+data lev2datp; set lev2dat; Predicted=%create_eqs;
+label predicted=Predicted&&rand&ii;
+* +-----------------------------------------------------------------------------------------------------------+
+If no variance in the predicted values, do not produce a scatter plot
+* +-----------------------------------------------------------------------------------------------------------+;
+proc means noprint data = lev2datp;
+var predicted;
+output out = check_var var = predicted_variance;
+data back; if _n_ = 1 then set check_var; set lev2datp; retain predicted_variance;
+if predicted_variance = 0 then do;
+predicted = .; residual = .;
+end;
+proc gplot data=back;
+plot residual*predicted;
+title "Homogeneity of variance plot of level-2 errors";
+%end;
+%end;
+* +-----------------------------------------------------------------------------------------------------------+
+Assessment of univariate and multivariate normality for level-2 residuals
+* +-----------------------------------------------------------------------------------------------------------+;
+proc sort data = &solnR; by effect &subj;
+proc univariate data = &solnR normal plot; by effect;
+var estimate; id &subj;
+histogram estimate /vscale=count cfill=steel;
+title 'Distribution of level-2 residuals';
+proc means noprint data = &solnR; by effect; var estimate;
+output out = geteffects mean = dummyvar;
+title ;
+data geteffects; set geteffects; keep effect;
+proc iml;
+use geteffects;
+read all var {effect} into effects;
+use &solnR;
+read all var {estimate} into allresids;
+read all var {&SUBJ} into allsubj;
+N_obs = NROW(allresids)/NROW(effects);
+y1 = J(N_obs,NROW(effects),0);
+startrow = 1; endrow = N_obs;
+do col = 1 to NROW(effects);
+y1[,col] = allresids[startrow:endrow,1];
+startrow = endrow+1;
+endrow = endrow + N_Obs;
+end;
+subjlist = allsubj[1:N_Obs,1];
+n1=nrow(y1); p1=ncol(y1);
+ybar1 = 1/n1 * y1` * J(N1,1);
+16
+y1barm = repeat(ybar1,1,n1);
+s1 = 1/(n1-1)*y1`*(i(n1)-1/n1*j(n1))*y1;
+d1 = (y1`-y1barm)`*inv(s1)*(y1`-y1barm);
+D1i2 = vecdiag(d1);
+sighat1 = 1/n1*y1`*(i(n1)-1/n1*j(n1))*y1;
+g1 = (y1`-y1barm)`*inv(sighat1)*(y1`-y1barm);
+b1p = SUM(g1##3)/n1##2;
+b2p = TRACE(g1##2)/n1;
+chiskew = (((p1+1)*(n1+1)*(n1+3))/(6*((n1+1)*(p1+1)-6)))*b1p;
+dfskew = (1/6)*p1*(p1+1)*(p1+2);
+pskew = 1 - probchi(chiskew,dfskew);
+zupper = (b2p - p1*(p1+2))/sqrt(8*p1*(p1+2)/n1);
+zlower = (b2p - (p1*(p1+2)*(n1+p1+1))/n1)/sqrt(8*p1*(p1+2)/(n1-1));
+pupper = 1 - probnorm(zupper);
+plower = probnorm(zlower);
+d1i2max=d1i2[1,1];
+d1maxsubj = subjlist[1,1];
+do i = 1 to n1;
+if d1i2[i,1]>=d1i2max then do;
+d1i2max=d1i2[i,1];
+d1maxsubj = subjlist[i,1];
+end;
+end;
+Fout = ((n1-p1-1)/p1)*((1/(1-(n1*d1i2max/(n1-1)**2)))-1);
+df1=p1;
+df2=n1-p1-1;
+pout= 1 - probf(Fout,df1,df2);
+file print;
+put @1 'Multivariate normality and outlier assessment' /
+@1 '---------------------------------------------' /
+@1 'Multivariate Skewness:' /
+@10 'b1p =' @30 b1p best10. /
+@10 'Chi-Square =' @30 chiskew best10. /
+@10 'df = ' @30 dfskew best10. /
+@10 'p-value =' @30 pskew best10. //
+@1 'Multivariate Kurtosis: ' /
+@10 'b2p =' @30 b2p best10. /
+@10 'Z (Upper) = ' @30 Zupper best10. /
+@10 'p-value (Upper) = ' @30 pupper best10. /
+@10 'Z (Lower) = ' @30 Zlower best10. /
+@10 'p-value (Lower) = ' @30 plower best10. //
+@1 'Largest Mahalanobis Distance:' /
+@10 'Level 2 Unit =' @30 d1maxsubj /
+@10 'D-Squared = ' @30 d1i2max best10. /
+@10 'F = ' @30 fout best10. /
+@10 'df numerator = ' @30 df1 best10. /
+@10 'df denominator =' @30 df2 best10. /
+@10 'p-value' @30 pout best10.;
+create v1 from D1i2 (|COLNAME={'Di'}|);
+append from D1i2;
+create v2 from subjlist (|COLNAME={'Level_2_Unit'}|);
+append from subjlist;
+data v3; merge v1 v2;
+proc sort data = v3; by descending Di;
+proc print noobs; var Level_2_Unit Di;
+title 'Mahalanobis distance values for level-2 units';
+proc univariate data = v3 normal plot; var Di; id Level_2_Unit;
+histogram Di /vscale=count cfill=steel;
+title 'Distribution of Mahalanobis distances for multivariate outlier analysis';
+* +-----------------------------------------------------------------------------------------------------------+
+Code to create a ranked summary table of the oodles of influence diagnostics
+created in SAS
+* +-----------------------------------------------------------------------------------------------------------+;
+proc rank data=&influence groups=100 out=rinfluence;
+var press CookD MDFFITS COVRATIO COVTRACE CookDCP MDFFITSCP
+COVRATIOCP COVTRACECP RMSE RLD;
+ranks rpress rCookD rMDFFITS rCOVRATIO rCOVTRACE rCookDCP
+rMDFFITSCP rCOVRATIOCP
+rCOVTRACECP rRMSE rRLD;
+**create flags to count 'influential' markers for sorting;
+data rinfluence; set rinfluence;
+if (rpress gt &pr) then press_flag = 1;
+if (rCookD gt &pr) then CookD_flag = 1;
+if (rMDFFITS gt &pr) then MDFFITS_flag = 1;
+if (rCOVRATIO lt (100-&pr)) then COVRATIO_flag = 1;
+if (rCOVTRACE gt &pr) then COVTRACE_flag = 1;
+if (rCookDCP gt &pr) then CookDCP_flag = 1;
+if (rMDFFITSCP gt &pr) then MDFFITSCP_flag = 1;
+if (rCOVRATIOCP gt &pr) then COVRATIOCP_flag = 1;
+if (rCOVTRACECP gt &pr) then COVTRACECP_flag = 1;
+if (rRMSE gt &pr) then RMSE_flag = 1;
+if (rRLD gt &pr) then RLD_flag = 1;
+array flag(1:11) press_flag CookD_flag MDFFITS_flag COVRATIO_flag
+COVTRACE_flag CookDCP_flag MDFFITSCP_flag COVRATIOCP_flag
+COVTRACECP_flag RMSE_flag RLD_flag;
+flags=0;
+do i=1 to 11;
+if flag(i)=1 then flags=flags+1;
+end;
+proc sort data = rinfluence; by descending flags;
+proc print data = rinfluence;
+var &subj flags nobs iter cookd mdffits covratio covtrace CookDCP
+MDFFITSCP COVRATIOCP COVTRACECP PRESS RMSE RLD;
+title 'Ranked influence diagnostics';
+run;
+%mend MIXED_DX;
+* +-----------------------------------------------------------------------------------------------------------+
+Example of how users need to set up their PROC MIXED code for use with the
+MIXED_DX macro. Specifically, the MIXED_DX macro is set up to read output
+generated from 2-level models using the specific options and output data files as
+specified below. Users only need to update the code where indicated by
+'USER……...'.
+* +-----------------------------------------------------------------------------------------------------------+;
+17
+ods exclude SolutionR influence;
+title;
+proc mixed data = USER ADD DATA NAME covtest noclprint NAMELEN=32;
+class USER ADD CLUSTER VARIABLE NAME;
+model USER SPECIFY MODEL HERE/ solution outp=L1Resid
+influence(effect=USER ADD CLUSTER VARIABLE NAME iter=5);
+random USER SPECIFY MODEL HERE / sub=USER ADD CLUSTER VARIABLE
+NAME solution type=USER SPECIFY VARIANCE STRUCTURE HERE;
+ods output SolutionR=L2Resid SolutionF=Fixed ModelInfo=ModelStuff
+Dimensions=DatStuff Influence=influence;
+run;
+%mixed_dx (ModelI = modelstuff, Dims = datstuff, solnF = Fixed, solnR = L2Resid,
+Level1 = L1Resid, Influence = influence, min_nj = 5, pr = 90);
+run;
